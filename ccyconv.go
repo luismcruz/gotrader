@@ -25,6 +25,8 @@ func newInstrumentConversion(name, baseCurrency, quoteCurrency string) *instrume
 		QuoteCurrency:       quoteCurrency,
 		BaseConversionRate:  atomic.NewFloat64(0),
 		QuoteConversionRate: atomic.NewFloat64(0),
+		Bid:                 atomic.NewFloat64(0),
+		Ask:                 atomic.NewFloat64(0),
 	}
 }
 

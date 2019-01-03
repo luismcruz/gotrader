@@ -177,7 +177,7 @@ func (c *OandaClient) subscribeTransactions(accountID string, handler Transactio
 				continue
 			}
 
-			logrus.Info(string(line))
+			//logrus.Info(string(line))
 
 			handler(data)
 
