@@ -1,6 +1,8 @@
 package gotrader
 
-import "github.com/cornelk/hashmap"
+import (
+	"github.com/cornelk/hashmap"
+)
 
 // Side represents the type of position, which can be short or long
 type Side int
@@ -41,7 +43,7 @@ type Position struct {
 *
 ***************************/
 
-func newPosition(side Side, leverage *float64) *Position {
+func newPosition(side Side) *Position {
 	return &Position{
 		side:            side,
 		trades:          &hashmap.HashMap{},
@@ -50,6 +52,7 @@ func newPosition(side Side, leverage *float64) *Position {
 }
 
 func (p *Position) openTrade(trade *Trade) {
+
 	p.tradesTimeOrder.Append(trade.id)
 	p.trades.Set(trade.id, trade)
 	p.tradesNumber++

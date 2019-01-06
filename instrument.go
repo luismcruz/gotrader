@@ -2,7 +2,6 @@ package gotrader
 
 import (
 	"math"
-	"sync"
 	"time"
 
 	"github.com/uber-go/atomic"
@@ -38,7 +37,6 @@ type Instrument struct {
 	bid                       *atomic.Float64
 	ccyConversion             *instrumentConversion
 	hedgeType                 Hedge
-	lock                      *sync.RWMutex
 }
 
 /**************************
@@ -55,22 +53,20 @@ func newInstrument(name, baseCurrency, quoteCurrency string,
 		baseCurrency:    baseCurrency,
 		quoteCurrency:   quoteCurrency,
 		leverage:        atomic.NewFloat64(leverage),
-		longPosition:    newPosition(Long, &leverage),
-		shortPosition:   newPosition(Short, &leverage),
+		longPosition:    newPosition(Long),
+		shortPosition:   newPosition(Short),
 		trades:          &hashmap.HashMap{},
 		tradesTimeOrder: newSortedTrades(),
 		ask:             atomic.NewFloat64(0.0),
 		bid:             atomic.NewFloat64(0.0),
-		lock:            &sync.RWMutex{},
 	}
 }
 
 func (i *Instrument) openTrade(id string, side Side, openTime time.Time, units int32, openPrice float64) {
 
-	trade := newTrade(id, i.name, side, units, openTime, openPrice, i.ccyConversion)
+	trade := newTrade(i, id, side, units, openTime, openPrice)
 	i.trades.Set(id, trade)
 	i.tradesTimeOrder.Append(id)
-	trade.leverage = i.leverage
 
 	if side == Short {
 		trade.currentPrice = i.ask

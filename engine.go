@@ -253,7 +253,7 @@ func (e *liveEngine) run() {
 // Check if all instruments have already a price defined
 func (e *liveEngine) checkState() {
 	for _, inst := range e.currencyConversionEngine.conversionInstruments {
-		if inst.Ask == nil {
+		if inst.Ask.Load() == 0.0 {
 			return
 		}
 	}

@@ -32,21 +32,25 @@ type Trade struct {
 *
 ***************************/
 
-func newTrade(tradeID, instName string, tradeSide Side,
+func newTrade(
+	inst *Instrument,
+	tradeID string,
+	tradeSide Side,
 	tradeUnits int32,
 	openTime time.Time,
 	openPrice float64,
-	ccyConver *instrumentConversion) *Trade {
+) *Trade {
 
 	tr := &Trade{
 		id:             tradeID,
-		instrumentName: instName,
+		instrumentName: inst.name,
 		side:           tradeSide,
 		units:          tradeUnits,
 		openTime:       openTime,
 		openPrice:      openPrice,
 		sideSign:       sideSign(tradeSide),
-		ccyConversion:  ccyConver,
+		ccyConversion:  inst.ccyConversion,
+		leverage:       inst.leverage,
 	}
 
 	return tr
