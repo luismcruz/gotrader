@@ -50,7 +50,7 @@ type MarketOrderTradeClose struct {
 type OrderFillTransaction struct {
 	Type           string          `json:"type"`
 	Instrument     string          `json:"instrument"`
-	Units          int32           `json:"units,string"`
+	Units          string          `json:"units"`
 	PL             string          `json:"pl"`
 	Financing      string          `json:"financing"`
 	Commission     string          `json:"commission"`

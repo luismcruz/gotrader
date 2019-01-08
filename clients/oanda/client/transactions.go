@@ -34,7 +34,7 @@ type Transaction struct {
 	TradesClosed       []*TradeReduced      `json:"tradesClosed"`
 	PositionFinancings []*PositionFinancing `json:"positionFinancings"`
 	Type               string               `json:"type"`
-	Units              int32                `json:"units,string"`
+	Units              string               `json:"units"`
 	RejectReason       *string              `json:"rejectReason"`
 }
 
