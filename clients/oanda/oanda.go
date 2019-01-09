@@ -227,6 +227,7 @@ func (t *transactionSubscription) transactionHandler(transaction *oandacl.Transa
 
 				if trade.Units > 0 { // Closing short trade
 					side = gotrader.Short
+				} else {
 					trade.Units = -trade.Units
 				}
 
