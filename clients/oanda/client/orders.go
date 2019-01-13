@@ -77,17 +77,11 @@ type TradeOpened struct {
 	Price   float64 `json:"price,string"`
 }
 
-func (c *OandaClient) CreateMarketOrder(accountID, instrument, side string, units int32) OrderResponse {
+func (c *OandaClient) CreateMarketOrder(accountID, instrument, side string, units int32) (OrderResponse, error) {
 
 	if side == "SHORT" {
 		units = -units
 	}
-
-	/*var extensions *ClientExtensions
-
-	if apiTradeID != "" {
-		extensions = &ClientExtensions{ID: &apiTradeID}
-	}*/
 
 	order := Order{
 		Units:        units,
@@ -95,7 +89,6 @@ func (c *OandaClient) CreateMarketOrder(accountID, instrument, side string, unit
 		TimeInForce:  "FOK",
 		Type:         "MARKET",
 		PositionFill: "DEFAULT",
-		//ClientExtensions: extensions,
 	}
 
 	body := OrderRequest{Order: order}
@@ -103,13 +96,24 @@ func (c *OandaClient) CreateMarketOrder(accountID, instrument, side string, unit
 	endpoint := "/accounts/" + accountID + "/orders"
 
 	jsonBody, err := json.Marshal(body)
-	checkErr(err)
 
-	response := c.post(endpoint, jsonBody)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	response, err := c.post(endpoint, jsonBody)
+
+	if err != nil {
+		return OrderResponse{}, err
+	}
 
 	data := OrderResponse{}
-	unmarshalJSON(response, &data)
+	err = json.Unmarshal(response, &data)
 
-	return data
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	return data, nil
 
 }

@@ -2,9 +2,6 @@ package gotrader
 
 import (
 	"errors"
-	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 // Option represents trading session functional option
@@ -146,11 +143,11 @@ func (s *TradingSession) Backtest() *TradingSession {
 // Start trading session.
 func (s *TradingSession) Start() error {
 
-	start := time.Now()
-
 	if s.engine == nil {
 		return errors.New("engine type is not defined")
 	}
+
+	var err error
 
 	switch s.engineType {
 	case 0:
@@ -158,16 +155,14 @@ func (s *TradingSession) Start() error {
 		engine.client = s.client
 		engine.strategy = s.strategy
 		engine.parameters = s.parameters
-		engine.start()
+		err = engine.start()
 	case 1:
 		engine := s.engine.(*btEngine)
 		engine.client = s.client
 		engine.strategy = s.strategy
 		engine.parameters = s.parameters
-		engine.start()
+		err = engine.start()
 	}
 
-	logrus.Info("Session Duration:", time.Since(start))
-
-	return nil
+	return err
 }

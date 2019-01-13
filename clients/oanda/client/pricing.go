@@ -1,9 +1,13 @@
 package oandacl
 
 import (
+	"bufio"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Pricings struct {
@@ -26,23 +30,38 @@ type PriceBucket struct {
 
 type PriceHandler func(price Price)
 
-func (c *OandaClient) GetPrices(accountID string, instruments []string) Pricings {
+func (c *OandaClient) GetPrices(accountID string, instruments []string) (Pricings, error) {
 
 	instrumentString := strings.Join(instruments, ",")
 	endpoint := "/accounts/" + accountID + "/pricing?instruments=" + url.QueryEscape(instrumentString)
 
-	response := c.get(endpoint)
-	data := Pricings{}
-	unmarshalJSON(response, &data)
-	return data
-}
+	response, err := c.get(endpoint)
 
-func (c *OandaClient) SubscribePrices(accountID string, instruments []string, handler PriceHandler) {
-
-	if c.managePriceSubscriptions(accountID, instruments) {
-		c.subscribePrices(accountID, handler)
+	if err != nil {
+		return Pricings{}, err
 	}
 
+	data := Pricings{}
+	err = json.Unmarshal(response, &data)
+
+	if err != nil {
+		return Pricings{}, err
+	}
+
+	return data, nil
+}
+
+func (c *OandaClient) SubscribePrices(accountID string, instruments []string, handler PriceHandler) error {
+
+	if c.managePriceSubscriptions(accountID, instruments) {
+		err := c.subscribePrices(accountID, handler)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (c *OandaClient) managePriceSubscriptions(accountID string, instruments []string) bool {
@@ -87,30 +106,44 @@ func (c *OandaClient) getInstrumentsList(accountID string) []string {
 
 }
 
-func (c *OandaClient) subscribePrices(accountID string, handler PriceHandler) {
+func (c *OandaClient) subscribePrices(accountID string, handler PriceHandler) error {
 
-	go func() {
+	instrumentString := strings.Join(c.getInstrumentsList(accountID), ",")
+	endpoint := "/accounts/" + accountID + "/pricing/stream?instruments=" + url.QueryEscape(instrumentString)
 
-		instrumentString := strings.Join(c.getInstrumentsList(accountID), ",")
-		endpoint := "/accounts/" + accountID + "/pricing/stream?instruments=" + url.QueryEscape(instrumentString)
+	reader, err := c.subscribe(endpoint)
 
-		reader := c.subscribe(endpoint)
+	if err != nil {
+		return err
+	}
+
+	go func(reader *bufio.Reader) {
 
 		for {
 
 			line, err := reader.ReadBytes('\n')
-			checkErr(err)
+
+			if err != nil {
+				logrus.Warn(err)
+				continue
+			}
 
 			if strings.Contains(string(line), "\"type\":\"HEARTBEAT\"") {
 				continue
 			}
 
 			data := Price{}
-			unmarshalJSON(line, &data)
-			handler(data)
+			err = json.Unmarshal(line, &data)
 
+			if err != nil {
+				logrus.Warn(err)
+				continue
+			}
+
+			handler(data)
 		}
 
-	}()
+	}(reader)
 
+	return nil
 }

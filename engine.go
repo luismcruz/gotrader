@@ -53,18 +53,27 @@ func newLiveEngine() *liveEngine {
 	}
 }
 
-func (e *liveEngine) start() {
+func (e *liveEngine) start() error {
 
 	e.account = newAccount(e.parameters.account)
 
 	// Account Status Retrieval
-	accountStatus := e.client.GetAccountStatus(e.parameters.account)
+	accountStatus, err := e.client.GetAccountStatus(e.parameters.account)
+
+	if err != nil {
+		return err
+	}
+
 	e.account.balance.Store(accountStatus.Balance)
 	e.account.homeCurrency = accountStatus.Currency
 	e.account.leverage = accountStatus.Leverage
 
 	// Initialize Trading Instruments
-	availableInstruments := e.client.GetAvailableInstruments(e.account.id)
+	availableInstruments, err := e.client.GetAvailableInstruments(e.account.id)
+
+	if err != nil {
+		return err
+	}
 
 	conversionInstruments := make(map[string]*instrumentConversion)
 
@@ -101,7 +110,12 @@ func (e *liveEngine) start() {
 	e.currencyConversionEngine.setPricePointers(e.account.instruments)
 
 	// Hydrate current positions state from Broker sorted by open time
-	trades := e.client.GetOpenTrades(e.account.id)
+	trades, err := e.client.GetOpenTrades(e.account.id)
+
+	if err != nil {
+		return err
+	}
+
 	sort.Slice(trades, func(i, j int) bool { return trades[i].OpenTime.Before(trades[j].OpenTime) })
 
 	for _, t := range trades {
@@ -114,12 +128,30 @@ func (e *liveEngine) start() {
 	}
 
 	// Subscribe prices
-	go e.client.SubscribePrices(e.account.id, e.currencyConversionEngine.conversionInstrumentsDetails, e.onTick)
+	err = e.client.SubscribePrices(e.account.id, e.currencyConversionEngine.conversionInstrumentsDetails, e.onTick)
+
+	if err != nil {
+		return err
+	}
 
 	// Subscribe notifications
-	go e.client.SubscribeOrderFillNotifications(e.account.id, e.onOrderFill)
-	go e.client.SubscribeSwapChargeNotifications(e.account.id, e.onSwapCharge)
-	go e.client.SubscribeFundsTransferNotifications(e.account.id, e.onFundsTransfer)
+	err = e.client.SubscribeOrderFillNotifications(e.account.id, e.onOrderFill)
+
+	if err != nil {
+		return err
+	}
+
+	err = e.client.SubscribeSwapChargeNotifications(e.account.id, e.onSwapCharge)
+
+	if err != nil {
+		return err
+	}
+
+	err = e.client.SubscribeFundsTransferNotifications(e.account.id, e.onFundsTransfer)
+
+	if err != nil {
+		return err
+	}
 
 	// Initialize consumers (buffered channels are used to prevent race conditions)
 	e.startOrderFillConsumer()
@@ -136,6 +168,7 @@ func (e *liveEngine) start() {
 	// Stop strategy
 	e.strategy.OnStop()
 
+	return nil
 }
 
 func (e *liveEngine) onTick(tick *Tick) { // Ticks callback
@@ -288,18 +321,27 @@ func (e *liveEngine) Buy(instrument string, units int32) {
 
 	go func() {
 
-		if e.calcMarginUsed(instrument, units) < e.account.marginFree { // Only send request if there is enough margin
-			e.client.OpenMarketOrder(e.account.id, instrument, units, Long.String())
-		} else {
-			order := &OrderFill{
+		if e.calcMarginUsed(instrument, units) > e.account.marginFree { // Only send request if there is enough margin
+			e.orders <- &OrderFill{
 				Error:      "NOT_ENOUGH_MARGIN",
 				Instrument: e.availableInstrumentsMap[instrument],
 				Side:       Long,
 				Units:      units,
 				Time:       time.Now(),
 			}
+			return
+		}
 
-			e.orders <- order
+		err := e.client.OpenMarketOrder(e.account.id, instrument, units, Long.String())
+
+		if err != nil {
+			e.orders <- &OrderFill{
+				Error:      err.Error(),
+				Instrument: e.availableInstrumentsMap[instrument],
+				Side:       Short,
+				Units:      units,
+				Time:       time.Now(),
+			}
 		}
 
 	}()
@@ -310,26 +352,49 @@ func (e *liveEngine) Sell(instrument string, units int32) {
 
 	go func() {
 
-		if e.calcMarginUsed(instrument, units) < e.account.marginFree { // Only send request if there is enough margin
-			e.client.OpenMarketOrder(e.account.id, instrument, units, Short.String())
-		} else {
-			order := &OrderFill{
+		if e.calcMarginUsed(instrument, units) > e.account.marginFree { // Only send request if there is enough margin
+			e.orders <- &OrderFill{
 				Error:      "NOT_ENOUGH_MARGIN",
 				Instrument: e.availableInstrumentsMap[instrument],
 				Side:       Short,
 				Units:      units,
 				Time:       time.Now(),
 			}
-
-			e.orders <- order
+			return
 		}
+
+		err := e.client.OpenMarketOrder(e.account.id, instrument, units, Short.String())
+
+		if err != nil {
+			e.orders <- &OrderFill{
+				Error:      err.Error(),
+				Instrument: e.availableInstrumentsMap[instrument],
+				Side:       Short,
+				Units:      units,
+				Time:       time.Now(),
+			}
+		}
+
 	}()
 
 }
 
 func (e *liveEngine) CloseTrade(instrument, id string) {
 
-	go e.client.CloseTrade(e.account.id, id)
+	go func() {
+
+		err := e.client.CloseTrade(e.account.id, id)
+
+		if err != nil {
+			e.orders <- &OrderFill{
+				Error:      err.Error(),
+				Instrument: e.availableInstrumentsMap[instrument],
+				TradeID:    id,
+				Time:       time.Now(),
+			}
+		}
+
+	}()
 
 }
 
@@ -367,7 +432,7 @@ func newBtEngine() *btEngine {
 	}
 }
 
-func (e *btEngine) start() {
+func (e *btEngine) start() error {
 
 	e.account = newAccount(e.parameters.account)
 
@@ -377,7 +442,11 @@ func (e *btEngine) start() {
 	e.account.leverage = e.parameters.testParameters.leverage
 
 	// Initialize Trading Instruments
-	availableInstruments := e.client.GetAvailableInstruments(e.account.id)
+	availableInstruments, err := e.client.GetAvailableInstruments(e.account.id)
+
+	if err != nil {
+		return err
+	}
 
 	availableInstrumentsMap := make(map[string]InstrumentDetails)
 
@@ -418,7 +487,11 @@ func (e *btEngine) start() {
 	e.currencyConversionEngine.setPricePointers(e.account.instruments)
 
 	// Subscribe prices
-	go e.client.SubscribePrices(e.account.id, e.currencyConversionEngine.conversionInstrumentsDetails, e.onTick)
+	err = e.client.SubscribePrices(e.account.id, e.currencyConversionEngine.conversionInstrumentsDetails, e.onTick)
+
+	if err != nil {
+		return err
+	}
 
 	// Initialize strategy
 	e.strategy.SetEngine(e)
@@ -430,6 +503,7 @@ func (e *btEngine) start() {
 	// Stop strategy
 	e.strategy.OnStop()
 
+	return nil
 }
 
 func (e *btEngine) onTick(tick *Tick) { // Ticks callback

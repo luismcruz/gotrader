@@ -3,13 +3,9 @@ package oandacl
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"io/ioutil"
 	"net/http"
-	"strings"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type Headers struct {
@@ -65,57 +61,84 @@ func NewClient(token string, live bool) *OandaClient {
 	return connection
 }
 
-func (c *OandaClient) get(endpoint string) []byte {
+func (c *OandaClient) get(endpoint string) ([]byte, error) {
 
 	url := c.restURL + endpoint
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
-	checkErr(err)
 
-	body := c.makeRequest(endpoint, req)
+	if err != nil {
+		return nil, err
+	}
 
-	return body
+	body, err := c.makeRequest(endpoint, req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }
 
-func (c *OandaClient) put(endpoint string) []byte {
+func (c *OandaClient) put(endpoint string) ([]byte, error) {
 
 	url := c.restURL + endpoint
 
 	req, err := http.NewRequest(http.MethodPut, url, nil)
-	checkErr(err)
 
-	body := c.makeRequest(endpoint, req)
+	if err != nil {
+		return nil, err
+	}
 
-	return body
+	body, err := c.makeRequest(endpoint, req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }
 
-func (c *OandaClient) subscribe(endpoint string) *bufio.Reader {
+func (c *OandaClient) subscribe(endpoint string) (*bufio.Reader, error) {
 
 	url := c.streamURL + endpoint
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
-	checkErr(err)
+
+	if err != nil {
+		return nil, err
+	}
 
 	c.setHeaders(req)
 
-	res, getErr := c.streamClient.Do(req)
-	checkErr(getErr)
+	res, err := c.streamClient.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
 
 	reader := bufio.NewReader(res.Body)
 
-	return reader
+	return reader, nil
 }
 
-func (c *OandaClient) post(endpoint string, data []byte) []byte {
+func (c *OandaClient) post(endpoint string, data []byte) ([]byte, error) {
 
 	url := c.restURL + endpoint
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	checkErr(err)
 
-	body := c.makeRequest(endpoint, req)
+	if err != nil {
+		return nil, err
+	}
 
-	return body
+	body, err := c.makeRequest(endpoint, req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }
 
 func (c *OandaClient) setHeaders(req *http.Request) {
@@ -123,35 +146,21 @@ func (c *OandaClient) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", c.headers.contentType)
 }
 
-func (c *OandaClient) makeRequest(endpoint string, req *http.Request) []byte {
+func (c *OandaClient) makeRequest(endpoint string, req *http.Request) ([]byte, error) {
+
 	c.setHeaders(req)
 
-	res, getErr := c.restClient.Do(req)
-	checkErr(getErr)
-	body, readErr := ioutil.ReadAll(res.Body)
-	checkErr(readErr)
-	checkAPIErr(body, endpoint)
+	res, err := c.restClient.Do(req)
 
-	return body
-}
-
-func unmarshalJSON(body []byte, data interface{}) {
-	jsonErr := json.Unmarshal(body, &data)
-	checkErr(jsonErr)
-}
-
-func checkErr(err error) {
 	if err != nil {
-		log.Warning(err)
-	}
-}
-
-func checkAPIErr(body []byte, route string) {
-
-	bodyString := string(body[:])
-
-	if strings.Contains(bodyString, "errorMessage") {
-		log.Warning("\nOANDA API Error: " + bodyString + "\nOn route: " + route)
+		return nil, err
 	}
 
+	body, err := ioutil.ReadAll(res.Body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }

@@ -1,6 +1,7 @@
 package oandacl
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -47,24 +48,42 @@ type OrderCancelTransaction struct {
 	Time      time.Time `json:"time"`
 }
 
-func (c *OandaClient) GetOpenTrades(accountID string) Trades {
+func (c *OandaClient) GetOpenTrades(accountID string) (Trades, error) {
 	endpoint := "/accounts/" + accountID + "/openTrades"
 
-	response := c.get(endpoint)
-	data := Trades{}
-	unmarshalJSON(response, &data)
+	response, err := c.get(endpoint)
 
-	return data
+	if err != nil {
+		return Trades{}, err
+	}
+
+	data := Trades{}
+	err = json.Unmarshal(response, &data)
+
+	if err != nil {
+		return Trades{}, err
+	}
+
+	return data, nil
 }
 
-func (c *OandaClient) CloseTrade(accountID, tradeID string) CloseTradeResponse {
+func (c *OandaClient) CloseTrade(accountID, tradeID string) (CloseTradeResponse, error) {
 
 	endpoint := "/accounts/" + accountID + "/trades/" + tradeID + "/close"
 
-	response := c.put(endpoint)
-	data := CloseTradeResponse{}
-	unmarshalJSON(response, &data)
+	response, err := c.put(endpoint)
 
-	return data
+	if err != nil {
+		return CloseTradeResponse{}, nil
+	}
+
+	data := CloseTradeResponse{}
+	err = json.Unmarshal(response, &data)
+
+	if err != nil {
+		return CloseTradeResponse{}, err
+	}
+
+	return data, nil
 
 }

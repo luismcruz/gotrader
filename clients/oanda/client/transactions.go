@@ -1,6 +1,8 @@
 package oandacl
 
 import (
+	"bufio"
+	"encoding/json"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -120,7 +122,7 @@ const (
 	FundsTransfer
 )
 
-func (c *OandaClient) SubscribeTransactions(accountID string, transType []TransactionType, handler TransactionHandler) {
+func (c *OandaClient) SubscribeTransactions(accountID string, transType []TransactionType, handler TransactionHandler) error {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -130,7 +132,11 @@ func (c *OandaClient) SubscribeTransactions(accountID string, transType []Transa
 		transactionLogic := newTransactionTypeLogic()
 		transactionLogic.hydrate(transType)
 		c.transactionSubscriptions[accountID] = transactionLogic
-		c.subscribeTransactions(accountID, handler)
+		err := c.subscribeTransactions(accountID, handler)
+
+		if err != nil {
+			return err
+		}
 
 	} else {
 
@@ -152,15 +158,19 @@ func (c *OandaClient) SubscribeTransactions(accountID string, transType []Transa
 		}
 	}
 
+	return nil
 }
 
-func (c *OandaClient) subscribeTransactions(accountID string, handler TransactionHandler) {
+func (c *OandaClient) subscribeTransactions(accountID string, handler TransactionHandler) error {
 
-	go func() {
+	endpoint := "/accounts/" + accountID + "/transactions/stream"
+	reader, err := c.subscribe(endpoint)
 
-		endpoint := "/accounts/" + accountID + "/transactions/stream"
-		reader := c.subscribe(endpoint)
+	if err != nil {
+		return err
+	}
 
+	go func(reader *bufio.Reader) {
 		for {
 
 			line, err := reader.ReadBytes('\n')
@@ -171,17 +181,21 @@ func (c *OandaClient) subscribeTransactions(accountID string, handler Transactio
 			}
 
 			data := &Transaction{}
-			unmarshalJSON(line, data)
+			err = json.Unmarshal(line, data)
+
+			if err != nil {
+				logrus.Warn(err)
+				logrus.Debug(line)
+				continue
+			}
 
 			if c.transactionSubscriptions[accountID].checkIgnore(data) {
 				continue
 			}
 
-			//logrus.Info(string(line))
-
 			handler(data)
-
 		}
-	}()
+	}(reader)
 
+	return nil
 }

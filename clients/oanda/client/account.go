@@ -1,6 +1,7 @@
 package oandacl
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -63,29 +64,62 @@ type Instrument struct {
 	Type                        string  `json:"type"`
 }
 
-func (c *OandaClient) GetAccounts() Accounts {
+func (c *OandaClient) GetAccounts() (Accounts, error) {
+
 	endpoint := "/accounts"
 
-	response := c.get(endpoint)
+	response, err := c.get(endpoint)
+
+	if err != nil {
+		return Accounts{}, nil
+	}
+
 	data := Accounts{}
-	unmarshalJSON(response, &data)
-	return data
+	err = json.Unmarshal(response, &data)
+
+	if err != nil {
+		return Accounts{}, err
+	}
+
+	return data, nil
 }
 
-func (c *OandaClient) GetAccountSummary(accountID string) AccountSummaryResponse {
+func (c *OandaClient) GetAccountSummary(accountID string) (AccountSummaryResponse, error) {
+
 	endpoint := "/accounts/" + accountID + "/summary"
 
-	response := c.get(endpoint)
+	response, err := c.get(endpoint)
+
+	if err != nil {
+		return AccountSummaryResponse{}, nil
+	}
+
 	data := AccountSummaryResponse{}
-	unmarshalJSON(response, &data)
-	return data
+	err = json.Unmarshal(response, &data)
+
+	if err != nil {
+		return AccountSummaryResponse{}, err
+	}
+
+	return data, nil
 }
 
-func (c *OandaClient) GetAccountInstruments(accountID string) AccountInstruments {
+func (c *OandaClient) GetAccountInstruments(accountID string) (AccountInstruments, error) {
+
 	endpoint := "/accounts/" + accountID + "/instruments"
 
-	response := c.get(endpoint)
+	response, err := c.get(endpoint)
+
+	if err != nil {
+		return AccountInstruments{}, err
+	}
+
 	data := AccountInstruments{}
-	unmarshalJSON(response, &data)
-	return data
+	err = json.Unmarshal(response, &data)
+
+	if err != nil {
+		return AccountInstruments{}, err
+	}
+
+	return data, nil
 }

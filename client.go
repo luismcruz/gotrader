@@ -3,17 +3,17 @@ package gotrader
 import "time"
 
 type BrokerClient interface {
-	GetAccountStatus(accountID string) AccountStatus
-	GetAvailableInstruments(accountID string) []InstrumentDetails
+	GetAccountStatus(accountID string) (AccountStatus, error)
+	GetAvailableInstruments(accountID string) ([]InstrumentDetails, error)
 
-	OpenMarketOrder(accountID, instrument string, units int32, side string)
-	CloseTrade(accountID, id string)
-	GetOpenTrades(accountID string) []TradeDetails
+	OpenMarketOrder(accountID, instrument string, units int32, side string) error
+	CloseTrade(accountID, id string) error
+	GetOpenTrades(accountID string) ([]TradeDetails, error)
 
-	SubscribePrices(accountID string, instruments []InstrumentDetails, callback TickHandler)
-	SubscribeOrderFillNotifications(accountID string, orderFIllCallback OrderFillHandler)
-	SubscribeSwapChargeNotifications(accountID string, swapChargeCallback SwapChargeHandler)
-	SubscribeFundsTransferNotifications(accountID string, fundsTransferCallback FundsTransferHandler)
+	SubscribePrices(accountID string, instruments []InstrumentDetails, callback TickHandler) error
+	SubscribeOrderFillNotifications(accountID string, orderFIllCallback OrderFillHandler) error
+	SubscribeSwapChargeNotifications(accountID string, swapChargeCallback SwapChargeHandler) error
+	SubscribeFundsTransferNotifications(accountID string, fundsTransferCallback FundsTransferHandler) error
 }
 
 type TradeDetails struct {

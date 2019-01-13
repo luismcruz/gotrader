@@ -9,6 +9,7 @@ import (
 )
 
 type btRandClient struct {
+	gotrader.BrokerClient
 	instruments         []gotrader.InstrumentDetails
 	instrumentsPriceGen map[string]*priceGenerator
 	startTime           time.Time
@@ -32,11 +33,11 @@ func NewBTRandClient(instruments []gotrader.InstrumentDetails,
 	return client
 }
 
-func (c *btRandClient) GetAvailableInstruments(accountID string) []gotrader.InstrumentDetails {
-	return c.instruments
+func (c *btRandClient) GetAvailableInstruments(accountID string) ([]gotrader.InstrumentDetails, error) {
+	return c.instruments, nil
 }
 
-func (c *btRandClient) SubscribePrices(accountID string, instruments []gotrader.InstrumentDetails, callback gotrader.TickHandler) {
+func (c *btRandClient) SubscribePrices(accountID string, instruments []gotrader.InstrumentDetails, callback gotrader.TickHandler) error {
 
 	go func() {
 
@@ -69,40 +70,5 @@ func (c *btRandClient) SubscribePrices(accountID string, instruments []gotrader.
 
 	}()
 
-}
-
-/*******************************************************************************************************************
-*
-*
-*									  Unused Methods (Needed for Live Only)
-*
-*
-*******************************************************************************************************************/
-
-func (c *btRandClient) OpenMarketOrder(accountID, instrument string, units int32, side string) {
-
-}
-
-func (c *btRandClient) CloseTrade(accountID, id string) {
-
-}
-
-func (c *btRandClient) GetOpenTrades(accountID string) []gotrader.TradeDetails {
 	return nil
-}
-
-func (c *btRandClient) GetAccountStatus(accountID string) gotrader.AccountStatus {
-	return gotrader.AccountStatus{}
-}
-
-func (c *btRandClient) SubscribeOrderFillNotifications(accountID string, orderFIllCallback gotrader.OrderFillHandler) {
-
-}
-
-func (c *btRandClient) SubscribeSwapChargeNotifications(accountID string, swapChargeCallback gotrader.SwapChargeHandler) {
-
-}
-
-func (c *btRandClient) SubscribeFundsTransferNotifications(accountID string, fundsTransferCallback gotrader.FundsTransferHandler) {
-
 }

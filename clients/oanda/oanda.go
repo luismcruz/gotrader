@@ -27,9 +27,13 @@ func NewOandaClient(token string, live bool) gotrader.BrokerClient {
 	}
 }
 
-func (c *oandaClientWrapper) GetAccountStatus(accountID string) gotrader.AccountStatus {
+func (c *oandaClientWrapper) GetAccountStatus(accountID string) (gotrader.AccountStatus, error) {
 
-	accountSummary := c.client.GetAccountSummary(accountID)
+	accountSummary, err := c.client.GetAccountSummary(accountID)
+
+	if err != nil {
+		return gotrader.AccountStatus{}, err
+	}
 
 	resp := gotrader.AccountStatus{
 		Currency:              accountSummary.Account.Currency,
@@ -42,12 +46,17 @@ func (c *oandaClientWrapper) GetAccountStatus(accountID string) gotrader.Account
 		Leverage:              1.0 / accountSummary.Account.MarginRate,
 	}
 
-	return resp
+	return resp, nil
 }
 
-func (c *oandaClientWrapper) GetAvailableInstruments(accountID string) []gotrader.InstrumentDetails {
+func (c *oandaClientWrapper) GetAvailableInstruments(accountID string) ([]gotrader.InstrumentDetails, error) {
 
-	oandaResp := c.client.GetAccountInstruments(accountID)
+	oandaResp, err := c.client.GetAccountInstruments(accountID)
+
+	if err != nil {
+		return nil, err
+	}
+
 	instruments := oandaResp.Instruments
 
 	resp := make([]gotrader.InstrumentDetails, len(instruments), len(instruments))
@@ -71,25 +80,39 @@ func (c *oandaClientWrapper) GetAvailableInstruments(accountID string) []gotrade
 		resp[i] = newInst
 	}
 
-	return resp
+	return resp, nil
 
 }
 
-func (c *oandaClientWrapper) OpenMarketOrder(accountID, instrument string, units int32, side string) {
+func (c *oandaClientWrapper) OpenMarketOrder(accountID, instrument string, units int32, side string) error {
 
-	c.client.CreateMarketOrder(accountID, instrument, side, units)
+	_, err := c.client.CreateMarketOrder(accountID, instrument, side, units)
 
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (c *oandaClientWrapper) CloseTrade(accountID, id string) {
+func (c *oandaClientWrapper) CloseTrade(accountID, id string) error {
 
-	c.client.CloseTrade(accountID, id)
+	_, err := c.client.CloseTrade(accountID, id)
 
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (c *oandaClientWrapper) GetOpenTrades(accountID string) []gotrader.TradeDetails {
+func (c *oandaClientWrapper) GetOpenTrades(accountID string) ([]gotrader.TradeDetails, error) {
 
-	tradesResp := c.client.GetOpenTrades(accountID)
+	tradesResp, err := c.client.GetOpenTrades(accountID)
+
+	if err != nil {
+		return nil, err
+	}
 
 	response := make([]gotrader.TradeDetails, len(tradesResp.Trades), len(tradesResp.Trades))
 
@@ -116,11 +139,11 @@ func (c *oandaClientWrapper) GetOpenTrades(accountID string) []gotrader.TradeDet
 
 	}
 
-	return response
+	return response, nil
 
 }
 
-func (c *oandaClientWrapper) SubscribePrices(accountID string, instruments []gotrader.InstrumentDetails, callback gotrader.TickHandler) {
+func (c *oandaClientWrapper) SubscribePrices(accountID string, instruments []gotrader.InstrumentDetails, callback gotrader.TickHandler) error {
 
 	instrumentsStrings := make([]string, len(instruments), len(instruments))
 
@@ -132,10 +155,16 @@ func (c *oandaClientWrapper) SubscribePrices(accountID string, instruments []got
 		c.priceSubscription = &priceSubscription{handler: callback}
 	}
 
-	c.client.SubscribePrices(accountID, instrumentsStrings, c.priceSubscription.priceHandler)
+	err := c.client.SubscribePrices(accountID, instrumentsStrings, c.priceSubscription.priceHandler)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (c *oandaClientWrapper) SubscribeOrderFillNotifications(accountID string, orderFillCallback gotrader.OrderFillHandler) {
+func (c *oandaClientWrapper) SubscribeOrderFillNotifications(accountID string, orderFillCallback gotrader.OrderFillHandler) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -147,10 +176,16 @@ func (c *oandaClientWrapper) SubscribeOrderFillNotifications(accountID string, o
 	subscription := c.transactionSubscription[accountID]
 	subscription.orderFillCallback = orderFillCallback
 
-	c.client.SubscribeTransactions(accountID, []oandacl.TransactionType{oandacl.OrderFill}, subscription.transactionHandler)
+	err := c.client.SubscribeTransactions(accountID, []oandacl.TransactionType{oandacl.OrderFill}, subscription.transactionHandler)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (c *oandaClientWrapper) SubscribeSwapChargeNotifications(accountID string, swapChargeCallback gotrader.SwapChargeHandler) {
+func (c *oandaClientWrapper) SubscribeSwapChargeNotifications(accountID string, swapChargeCallback gotrader.SwapChargeHandler) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -162,10 +197,16 @@ func (c *oandaClientWrapper) SubscribeSwapChargeNotifications(accountID string, 
 	subscription := c.transactionSubscription[accountID]
 	subscription.swapChargeCallback = swapChargeCallback
 
-	c.client.SubscribeTransactions(accountID, []oandacl.TransactionType{oandacl.Financing}, subscription.transactionHandler)
+	err := c.client.SubscribeTransactions(accountID, []oandacl.TransactionType{oandacl.Financing}, subscription.transactionHandler)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (c *oandaClientWrapper) SubscribeFundsTransferNotifications(accountID string, fundsTransferCallback gotrader.FundsTransferHandler) {
+func (c *oandaClientWrapper) SubscribeFundsTransferNotifications(accountID string, fundsTransferCallback gotrader.FundsTransferHandler) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -177,7 +218,13 @@ func (c *oandaClientWrapper) SubscribeFundsTransferNotifications(accountID strin
 	subscription := c.transactionSubscription[accountID]
 	subscription.fundsTransferCallback = fundsTransferCallback
 
-	c.client.SubscribeTransactions(accountID, []oandacl.TransactionType{oandacl.FundsTransfer}, subscription.transactionHandler)
+	err := c.client.SubscribeTransactions(accountID, []oandacl.TransactionType{oandacl.FundsTransfer}, subscription.transactionHandler)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type priceSubscription struct {
@@ -194,7 +241,6 @@ func (p *priceSubscription) priceHandler(price oandacl.Price) {
 	}
 
 	p.handler(tick)
-
 }
 
 type transactionSubscription struct {
