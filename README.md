@@ -8,12 +8,12 @@ A golang package to automatize trading strategies. This package was mainly devel
 
 Create a streategy that implements the Strategy interface:
 
-```
+```Go
 type MyStrategy struct {
     engine gotrader.Engine
 }
 
-func (s *MyStrategy) SetEngine(engine gotrader.Engine) { // Engine will inject himself to the strategy
+func (s *MyStrategy) SetEngine(engine gotrader.Engine) { // Engine will inject itself to the strategy
     s.engine = engine
 }
 
@@ -27,7 +27,7 @@ func (s *MyStrategy) OnTick(tick *gotrader.Tick) {
 
 Then just instantiate a trading session with the strategy and client you need:
 
-```
+```Go
 strategy := &MyStrategy{}
 
 client := oanda.NewOandaClient("my-token", false)
