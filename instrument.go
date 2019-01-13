@@ -81,7 +81,7 @@ func (i *Instrument) openTrade(id string, side Side, openTime time.Time, units i
 func (i *Instrument) closeTrade(id string) {
 
 	i.tradesTimeOrder.Delete(id)
-	tr, exist := i.trades.Get(id)
+	tr, exist := i.trades.GetStringKey(id)
 
 	if !exist {
 		logrus.Warn(i.name + ": trying to close unexisting trade")
@@ -164,17 +164,40 @@ func (i *Instrument) TradeByOrder(index int) string {
 	return i.tradesTimeOrder.Get(index)
 }
 
-func (i *Instrument) TradesByAscendingOrder(tradesNumber int) <-chan string {
-	return i.tradesTimeOrder.AscendIter(tradesNumber)
+func (i *Instrument) TradesByAscendingOrder(tradesNumber int) <-chan *Trade {
+
+	ch := make(chan *Trade)
+	go func() {
+		for id := range i.tradesTimeOrder.AscendIter(tradesNumber) {
+			tr, exist := i.trades.GetStringKey(id)
+			if exist {
+				ch <- tr.(*Trade)
+			}
+		}
+		close(ch)
+	}()
+
+	return ch
 }
 
-func (i *Instrument) TradesByDescendingOrder(tradesNumber int) <-chan string {
-	return i.tradesTimeOrder.DescendIter(tradesNumber)
+func (i *Instrument) TradesByDescendingOrder(tradesNumber int) <-chan *Trade {
+	ch := make(chan *Trade)
+	go func() {
+		for id := range i.tradesTimeOrder.DescendIter(tradesNumber) {
+			tr, exist := i.trades.GetStringKey(id)
+			if exist {
+				ch <- tr.(*Trade)
+			}
+		}
+		close(ch)
+	}()
+
+	return ch
 }
 
 func (i *Instrument) Trade(id string) *Trade {
 
-	trade, exist := i.trades.Get(id)
+	trade, exist := i.trades.GetStringKey(id)
 	if exist {
 		return trade.(*Trade)
 	}

@@ -129,23 +129,46 @@ func (p *Position) Side() Side {
 	return p.side
 }
 
-func (p *Position) TradeByOrder(index int) string {
-	return p.tradesTimeOrder.Get(index)
+func (p *Position) TradeByOrder(index int) *Trade {
+	return p.Trade(p.tradesTimeOrder.Get(index))
 }
 
-func (p *Position) TradesByAscendingOrder(tradesNumber int) <-chan string {
-	return p.tradesTimeOrder.AscendIter(tradesNumber)
+func (p *Position) TradesByAscendingOrder(tradesNumber int) <-chan *Trade {
+
+	ch := make(chan *Trade)
+	go func() {
+		for id := range p.tradesTimeOrder.AscendIter(tradesNumber) {
+			tr, exist := p.trades.GetStringKey(id)
+			if exist {
+				ch <- tr.(*Trade)
+			}
+		}
+		close(ch)
+	}()
+
+	return ch
 }
 
-func (p *Position) TradesByDescendingOrder(tradesNumber int) <-chan string {
-	return p.tradesTimeOrder.DescendIter(tradesNumber)
+func (p *Position) TradesByDescendingOrder(tradesNumber int) <-chan *Trade {
+	ch := make(chan *Trade)
+	go func() {
+		for id := range p.tradesTimeOrder.DescendIter(tradesNumber) {
+			tr, exist := p.trades.GetStringKey(id)
+			if exist {
+				ch <- tr.(*Trade)
+			}
+		}
+		close(ch)
+	}()
+
+	return ch
 }
 
 func (p *Position) Trade(id string) *Trade {
 
-	trade, ok := p.trades.Get(id)
+	trade, exist := p.trades.GetStringKey(id)
 
-	if ok {
+	if exist {
 		return trade.(*Trade)
 	}
 
