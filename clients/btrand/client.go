@@ -42,7 +42,7 @@ func (c *btRandClient) SubscribePrices(accountID string, instruments []gotrader.
 
 		for _, inst := range instruments {
 			startPrice := rand.Float64()*0.6 + 0.9
-			c.instrumentsPriceGen[inst.Name] = newCorePriceGenerator(inst.Name, c.startTime, startPrice, 100) //rand.Int63()
+			c.instrumentsPriceGen[inst.Name] = newCorePriceGenerator(inst.Name, c.startTime, startPrice, rand.Int63())
 		}
 
 		for c.currentTime.Before(c.endTime) {

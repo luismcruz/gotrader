@@ -39,16 +39,17 @@ type liveEngine struct {
 	fundsTransfers           chan *FundsTransfer
 	swapCharges              chan *SwapCharge
 	ready                    bool
-	endOfSession             bool
+	endOfSession             chan bool
 }
 
 func newLiveEngine() *liveEngine {
 	return &liveEngine{
-		ticks:                   make(chan *Tick, 100),
+		ticks:                   make(chan *Tick, 300),
 		orders:                  make(chan *OrderFill, 100),
 		fundsTransfers:          make(chan *FundsTransfer, 100),
 		swapCharges:             make(chan *SwapCharge, 100),
 		availableInstrumentsMap: make(map[string]InstrumentDetails),
+		endOfSession:            make(chan bool, 1),
 	}
 }
 
@@ -139,12 +140,13 @@ func (e *liveEngine) start() {
 
 func (e *liveEngine) onTick(tick *Tick) { // Ticks callback
 
-	if !e.endOfSession {
-		select { // non blocking buffered channel
-		case e.ticks <- tick:
-		default:
-		}
+	select { // non blocking buffered channel
+	case e.ticks <- tick:
+	default: // Replaces older ticks by newer ones (extreme case)
+		<-e.ticks
+		e.ticks <- tick
 	}
+
 }
 
 func (e *liveEngine) onOrderFill(orderFill *OrderFill) { // Orders callback
@@ -212,39 +214,41 @@ func (e *liveEngine) startFundsTransferConsumer() {
 
 func (e *liveEngine) run() {
 
-	for tick := range e.ticks { // Application blocks until end of session
+	for { // Application blocks until end of session
 
-		if e.endOfSession {
-			break
-		}
+		select {
+		case <-e.endOfSession:
+			return
+		case tick := <-e.ticks:
 
-		if _, exist := e.account.instruments[tick.Instrument]; exist {
+			if _, exist := e.account.instruments[tick.Instrument]; exist {
 
-			e.account.instruments[tick.Instrument].updatePrice(tick)
-			e.currencyConversionEngine.updateRate(tick.Instrument)
-			e.account.time = tick.Time
-
-			if e.ready {
-
-				e.account.calculateUnrealized()
-				e.account.calculateMarginUsed()
-				e.account.calculateFreeMargin()
-
-				e.strategy.OnTick(tick)
-			} else {
-				e.checkState()
-			}
-
-		} else { // This is the auxiliar instrument update (price state is kept only on the ccyconv engine)
-
-			if _, exist := e.currencyConversionEngine.conversionInstruments[tick.Instrument]; exist {
-
-				inst := e.currencyConversionEngine.conversionInstruments[tick.Instrument]
-				inst.Bid.Store(tick.Bid)
-				inst.Ask.Store(tick.Ask)
+				e.account.instruments[tick.Instrument].updatePrice(tick)
 				e.currencyConversionEngine.updateRate(tick.Instrument)
-			} else {
-				logrus.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
+				e.account.time = tick.Time
+
+				if e.ready {
+
+					e.account.calculateUnrealized()
+					e.account.calculateMarginUsed()
+					e.account.calculateFreeMargin()
+
+					e.strategy.OnTick(tick)
+				} else {
+					e.checkState()
+				}
+
+			} else { // This is the auxiliar instrument update (price state is kept only on the ccyconv engine)
+
+				if _, exist := e.currencyConversionEngine.conversionInstruments[tick.Instrument]; exist {
+
+					inst := e.currencyConversionEngine.conversionInstruments[tick.Instrument]
+					inst.Bid.Store(tick.Bid)
+					inst.Ask.Store(tick.Ask)
+					e.currencyConversionEngine.updateRate(tick.Instrument)
+				} else {
+					logrus.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
+				}
 			}
 		}
 	}
@@ -325,14 +329,12 @@ func (e *liveEngine) Sell(instrument string, units int32) {
 
 func (e *liveEngine) CloseTrade(instrument, id string) {
 
-	go func() {
-		e.client.CloseTrade(e.account.id, id)
-	}()
+	go e.client.CloseTrade(e.account.id, id)
 
 }
 
 func (e *liveEngine) StopSession() {
-	e.endOfSession = true
+	e.endOfSession <- true
 }
 
 /***********************************************************************************************
@@ -353,14 +355,15 @@ type btEngine struct {
 	tradesCounter            *atomic.Int32
 	instrumentsDetails       map[string]InstrumentDetails
 	ready                    bool
-	endOfSession             bool
+	endOfSession             chan bool
 }
 
 func newBtEngine() *btEngine {
 	return &btEngine{
-		ticks:              make(chan *Tick, 100),
+		ticks:              make(chan *Tick, 300),
 		tradesCounter:      atomic.NewInt32(0),
 		instrumentsDetails: make(map[string]InstrumentDetails),
+		endOfSession:       make(chan bool, 1),
 	}
 }
 
@@ -430,9 +433,7 @@ func (e *btEngine) start() {
 }
 
 func (e *btEngine) onTick(tick *Tick) { // Ticks callback
-	if !e.endOfSession {
-		e.ticks <- tick
-	}
+	e.ticks <- tick
 }
 
 func (e *btEngine) onOrderOpen(instrument string, units int32, side Side) {
@@ -535,39 +536,45 @@ func (e *btEngine) onCloseTrade(tradeID, instrument string) {
 
 func (e *btEngine) run() {
 
-	for tick := range e.ticks { // Application blocks until ticks channel is closed
+	for { // Application blocks until ticks channel is closed
 
-		if tick == nil || e.endOfSession {
-			break
-		}
+		select {
+		case <-e.endOfSession:
+			return
+		case tick := <-e.ticks:
 
-		if _, exist := e.account.instruments[tick.Instrument]; exist {
-
-			e.account.instruments[tick.Instrument].updatePrice(tick)
-			e.currencyConversionEngine.updateRate(tick.Instrument)
-			e.account.time = tick.Time
-
-			if e.ready {
-
-				e.account.calculateUnrealized()
-				e.account.calculateMarginUsed()
-				e.account.calculateFreeMargin()
-
-				e.strategy.OnTick(tick)
-			} else {
-				e.checkState()
+			if tick == nil {
+				return
 			}
 
-		} else { // This is the auxiliar instrument update (price state is kept only on the ccyconv engine)
+			if _, exist := e.account.instruments[tick.Instrument]; exist {
 
-			if _, exist := e.currencyConversionEngine.conversionInstruments[tick.Instrument]; exist {
-
-				inst := e.currencyConversionEngine.conversionInstruments[tick.Instrument]
-				inst.Bid.Store(tick.Bid)
-				inst.Ask.Store(tick.Ask)
+				e.account.instruments[tick.Instrument].updatePrice(tick)
 				e.currencyConversionEngine.updateRate(tick.Instrument)
-			} else {
-				logrus.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
+				e.account.time = tick.Time
+
+				if e.ready {
+
+					e.account.calculateUnrealized()
+					e.account.calculateMarginUsed()
+					e.account.calculateFreeMargin()
+
+					e.strategy.OnTick(tick)
+				} else {
+					e.checkState()
+				}
+
+			} else { // This is the auxiliar instrument update (price state is kept only on the ccyconv engine)
+
+				if _, exist := e.currencyConversionEngine.conversionInstruments[tick.Instrument]; exist {
+
+					inst := e.currencyConversionEngine.conversionInstruments[tick.Instrument]
+					inst.Bid.Store(tick.Bid)
+					inst.Ask.Store(tick.Ask)
+					e.currencyConversionEngine.updateRate(tick.Instrument)
+				} else {
+					logrus.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
+				}
 			}
 		}
 	}
@@ -596,22 +603,22 @@ func (e *btEngine) Account() *Account {
 
 func (e *btEngine) Buy(instrument string, units int32) {
 
-	go e.onOrderOpen(instrument, units, Long)
+	e.onOrderOpen(instrument, units, Long)
 
 }
 
 func (e *btEngine) Sell(instrument string, units int32) {
 
-	go e.onOrderOpen(instrument, units, Short)
+	e.onOrderOpen(instrument, units, Short)
 
 }
 
 func (e *btEngine) CloseTrade(instrument, id string) {
 
-	go e.onCloseTrade(id, instrument)
+	e.onCloseTrade(id, instrument)
 
 }
 
 func (e *btEngine) StopSession() {
-	e.endOfSession = true
+	e.endOfSession <- true
 }

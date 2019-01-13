@@ -49,7 +49,8 @@ if err := session.Start(); err != nil {
 
 ## Included Clients
 
-Oanda client and random generator for testing.
+- Oanda
+- Random Generator (testing)
 
 ## TODO
 
