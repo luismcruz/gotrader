@@ -39,7 +39,7 @@ type OrderCreateTransaction struct {
 	Time         time.Time              `json:"time"`
 	TimeInForce  string                 `json:"timeInForce"`
 	Type         string                 `json:"type"`
-	Units        string                 `json:"units,string"`
+	Units        string                 `json:"units"`
 }
 
 type MarketOrderTradeClose struct {
