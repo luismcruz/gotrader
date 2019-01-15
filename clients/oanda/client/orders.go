@@ -44,7 +44,7 @@ type OrderCreateTransaction struct {
 
 type MarketOrderTradeClose struct {
 	TradeID string `json:"tradeID"`
-	Units   int32  `json:"units,string"`
+	Units   string `json:"units"`
 }
 
 type OrderFillTransaction struct {
