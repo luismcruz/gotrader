@@ -3,8 +3,10 @@ package oandacl
 import (
 	"bufio"
 	"encoding/json"
+	"math"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -51,12 +53,54 @@ func (c *OandaClient) GetPrices(accountID string, instruments []string) (Pricing
 	return data, nil
 }
 
-func (c *OandaClient) SubscribePrices(accountID string, instruments []string, handler PriceHandler) error {
+func (c *OandaClient) SubscribePrices(accountID string, instruments []string, handler PriceHandler) (*PriceSubscription, error) {
 
-	if c.managePriceSubscriptions(accountID, instruments) {
-		err := c.subscribePrices(accountID, handler)
+	subscription := newPriceSubscrption(c.dial, handler, accountID)
+	err := subscription.subscribe(instruments)
 
-		if err != nil {
+	if err != nil {
+		return nil, err
+	}
+
+	return subscription, nil
+}
+
+// PriceSubscription represents a subscription, can be used to free resources
+type PriceSubscription struct {
+	priceSubscriptions   map[string]bool
+	stopPriceSubscripton chan bool
+	handler              PriceHandler
+	mutex                *sync.Mutex
+	dial                 func(endpoint string) (*bufio.Reader, error)
+	accountID            string
+	activeSubscription   bool
+}
+
+func newPriceSubscrption(dial func(endpoint string) (*bufio.Reader, error),
+	handler PriceHandler, accountID string) *PriceSubscription {
+
+	return &PriceSubscription{
+		priceSubscriptions:   make(map[string]bool),
+		stopPriceSubscripton: make(chan bool),
+		mutex:                &sync.Mutex{},
+		dial:                 dial,
+		accountID:            accountID,
+		handler:              handler,
+	}
+}
+
+// Stop will stop the subscription
+func (s *PriceSubscription) Stop() {
+	s.stopPriceSubscripton <- true
+}
+
+func (s *PriceSubscription) subscribe(instruments []string) error {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.needsToDial(instruments) {
+		if err := s.subscribePrices(); err != nil {
 			return err
 		}
 	}
@@ -64,86 +108,106 @@ func (c *OandaClient) SubscribePrices(accountID string, instruments []string, ha
 	return nil
 }
 
-func (c *OandaClient) managePriceSubscriptions(accountID string, instruments []string) bool {
+func (s *PriceSubscription) subscribePrices() error {
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	instrumentString := strings.Join(s.getInstrumentsList(s.accountID), ",")
+	endpoint := "/accounts/" + s.accountID + "/pricing/stream?instruments=" + url.QueryEscape(instrumentString)
 
-	if _, exist := c.priceSubscriptions[accountID]; !exist {
-		c.priceSubscriptions[accountID] = make(map[string]bool)
-	}
-
-	subscribe := false
-
-	for _, inst := range instruments {
-		if val, exist := c.priceSubscriptions[accountID][inst]; !exist || !val {
-			c.priceSubscriptions[accountID][inst] = true
-			subscribe = true
-		}
-	}
-
-	return subscribe
-
-}
-
-func (c *OandaClient) getInstrumentsList(accountID string) []string {
-
-	var length int
-
-	if _, exist := c.priceSubscriptions[accountID]; exist {
-		length = len(c.priceSubscriptions[accountID])
-	}
-
-	instrumentsList := make([]string, 0, length)
-
-	for inst := range c.priceSubscriptions[accountID] {
-		if c.priceSubscriptions[accountID][inst] {
-			instrumentsList = append(instrumentsList, inst)
-		}
-	}
-
-	return instrumentsList
-
-}
-
-func (c *OandaClient) subscribePrices(accountID string, handler PriceHandler) error {
-
-	instrumentString := strings.Join(c.getInstrumentsList(accountID), ",")
-	endpoint := "/accounts/" + accountID + "/pricing/stream?instruments=" + url.QueryEscape(instrumentString)
-
-	reader, err := c.subscribe(endpoint)
+	reader, err := s.dial(endpoint)
 
 	if err != nil {
 		return err
 	}
 
-	go func(reader *bufio.Reader) {
+	if s.activeSubscription { // Shuts down previous go routine
+		s.stopPriceSubscripton <- true // channel is not buffered to make sure it waits for the shutdown
+	} else {
+		s.activeSubscription = true
+	}
 
+	go func(reader *bufio.Reader, endpoint string) {
+
+	subLoop:
 		for {
+			select {
+			case <-s.stopPriceSubscripton:
+				break subLoop
+			default:
 
-			line, err := reader.ReadBytes('\n')
+				line, err := reader.ReadBytes('\n')
 
-			if err != nil {
-				logrus.Warn(err)
-				continue
+				if err != nil {
+
+					logrus.Warn(err)
+
+					if reader, err = s.reconnect(endpoint); err != nil { // Did not recover subscription, break outer loop
+						break subLoop
+					}
+
+					continue
+				}
+
+				if strings.Contains(string(line), "\"type\":\"HEARTBEAT\"") { // Ignore heartbeats
+					continue
+				}
+
+				data := Price{}
+				err = json.Unmarshal(line, &data)
+
+				if err != nil {
+					logrus.Warn(err)
+					continue
+				}
+
+				s.handler(data)
 			}
-
-			if strings.Contains(string(line), "\"type\":\"HEARTBEAT\"") {
-				continue
-			}
-
-			data := Price{}
-			err = json.Unmarshal(line, &data)
-
-			if err != nil {
-				logrus.Warn(err)
-				continue
-			}
-
-			handler(data)
 		}
 
-	}(reader)
+		s.activeSubscription = false
+
+	}(reader, endpoint)
 
 	return nil
+}
+
+func (s *PriceSubscription) reconnect(endpoint string) (reader *bufio.Reader, err error) {
+
+	for i := 0; i < 3; i++ { // Try reconnection 3 times with exponential backoff
+
+		logrus.Info("Trying to recover subscription...")
+
+		time.Sleep(time.Duration(math.Pow(2, float64(i))) * 100 * time.Millisecond)
+
+		reader, err = s.dial(endpoint)
+
+		if err == nil {
+			logrus.Info("Subscription recovered")
+			return
+		}
+	}
+
+	return
+}
+
+func (s *PriceSubscription) needsToDial(instruments []string) (subscribe bool) {
+
+	for _, inst := range instruments {
+		if !s.priceSubscriptions[inst] {
+			s.priceSubscriptions[inst] = true
+			subscribe = true
+		}
+	}
+
+	return
+}
+
+func (s *PriceSubscription) getInstrumentsList(accountID string) []string {
+
+	instrumentsList := make([]string, 0, len(s.priceSubscriptions))
+	for inst := range s.priceSubscriptions {
+		instrumentsList = append(instrumentsList, inst)
+	}
+
+	return instrumentsList
+
 }

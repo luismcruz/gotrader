@@ -20,9 +20,10 @@ type OandaClient struct {
 	headers                  Headers
 	restClient               http.Client
 	streamClient             http.Client
-	priceSubscriptions       map[string]map[string]bool
+	priceSubscriptions       map[string]bool
 	transactionSubscriptions map[string]*transactionTypeLogic
 	mutex                    sync.Locker
+	stopPriceSubscripton     chan bool
 }
 
 func NewClient(token string, live bool) *OandaClient {
@@ -53,7 +54,6 @@ func NewClient(token string, live bool) *OandaClient {
 		headers:                  headers,
 		restClient:               http.Client{},
 		streamClient:             http.Client{},
-		priceSubscriptions:       make(map[string]map[string]bool),
 		transactionSubscriptions: make(map[string]*transactionTypeLogic),
 		mutex: &sync.Mutex{},
 	}
@@ -71,13 +71,7 @@ func (c *OandaClient) get(endpoint string) ([]byte, error) {
 		return nil, err
 	}
 
-	body, err := c.makeRequest(endpoint, req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return body, nil
+	return c.makeRequest(req)
 }
 
 func (c *OandaClient) put(endpoint string) ([]byte, error) {
@@ -90,16 +84,23 @@ func (c *OandaClient) put(endpoint string) ([]byte, error) {
 		return nil, err
 	}
 
-	body, err := c.makeRequest(endpoint, req)
+	return c.makeRequest(req)
+}
+
+func (c *OandaClient) post(endpoint string, data []byte) ([]byte, error) {
+
+	url := c.restURL + endpoint
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 
 	if err != nil {
 		return nil, err
 	}
 
-	return body, nil
+	return c.makeRequest(req)
 }
 
-func (c *OandaClient) subscribe(endpoint string) (*bufio.Reader, error) {
+func (c *OandaClient) dial(endpoint string) (*bufio.Reader, error) {
 
 	url := c.streamURL + endpoint
 
@@ -117,36 +118,10 @@ func (c *OandaClient) subscribe(endpoint string) (*bufio.Reader, error) {
 		return nil, err
 	}
 
-	reader := bufio.NewReader(res.Body)
-
-	return reader, nil
+	return bufio.NewReader(res.Body), nil
 }
 
-func (c *OandaClient) post(endpoint string, data []byte) ([]byte, error) {
-
-	url := c.restURL + endpoint
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := c.makeRequest(endpoint, req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return body, nil
-}
-
-func (c *OandaClient) setHeaders(req *http.Request) {
-	req.Header.Set("Authorization", c.headers.auth)
-	req.Header.Set("Content-Type", c.headers.contentType)
-}
-
-func (c *OandaClient) makeRequest(endpoint string, req *http.Request) ([]byte, error) {
+func (c *OandaClient) makeRequest(req *http.Request) ([]byte, error) {
 
 	c.setHeaders(req)
 
@@ -163,4 +138,9 @@ func (c *OandaClient) makeRequest(endpoint string, req *http.Request) ([]byte, e
 	}
 
 	return body, nil
+}
+
+func (c *OandaClient) setHeaders(req *http.Request) {
+	req.Header.Set("Authorization", c.headers.auth)
+	req.Header.Set("Content-Type", c.headers.contentType)
 }

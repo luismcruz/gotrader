@@ -155,7 +155,7 @@ func (c *oandaClientWrapper) SubscribePrices(accountID string, instruments []got
 		c.priceSubscription = &priceSubscription{handler: callback}
 	}
 
-	err := c.client.SubscribePrices(accountID, instrumentsStrings, c.priceSubscription.priceHandler)
+	_, err := c.client.SubscribePrices(accountID, instrumentsStrings, c.priceSubscription.priceHandler)
 
 	if err != nil {
 		return err

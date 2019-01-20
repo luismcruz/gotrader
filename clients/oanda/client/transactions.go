@@ -164,7 +164,7 @@ func (c *OandaClient) SubscribeTransactions(accountID string, transType []Transa
 func (c *OandaClient) subscribeTransactions(accountID string, handler TransactionHandler) error {
 
 	endpoint := "/accounts/" + accountID + "/transactions/stream"
-	reader, err := c.subscribe(endpoint)
+	reader, err := c.dial(endpoint)
 
 	if err != nil {
 		return err
