@@ -2,8 +2,11 @@ package gotrader
 
 import (
 	"math"
+	"os"
+	"os/signal"
 	"sort"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/uber-go/atomic"
@@ -162,6 +165,9 @@ func (e *liveEngine) start() error {
 	e.strategy.SetEngine(e)
 	e.strategy.Initialize()
 
+	// Run strategy OnStop method when the app receives the signal to shutdown
+	e.shutdownHook()
+
 	// Run strategy
 	e.run()
 
@@ -169,6 +175,18 @@ func (e *liveEngine) start() error {
 	e.strategy.OnStop()
 
 	return nil
+}
+
+func (e *liveEngine) shutdownHook() {
+	var singalChan = make(chan os.Signal)
+	signal.Notify(singalChan, syscall.SIGTERM)
+	signal.Notify(singalChan, syscall.SIGINT)
+
+	go func() {
+		<-singalChan
+		e.strategy.OnStop()
+		os.Exit(0)
+	}()
 }
 
 func (e *liveEngine) onTick(tick *Tick) { // Ticks callback
