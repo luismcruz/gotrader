@@ -3,6 +3,7 @@ package oandacl
 import (
 	"bufio"
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -170,13 +171,21 @@ func (c *OandaClient) subscribeTransactions(accountID string, handler Transactio
 		return err
 	}
 
-	go func(reader *bufio.Reader) {
+	go func(reader *bufio.Reader, endpoint string) {
+
+	subLoop:
 		for {
 
 			line, err := reader.ReadBytes('\n')
 
 			if err != nil {
+
 				logrus.Warn(err)
+
+				if reader, err = c.reconnect(endpoint); err != nil { // Did not recover subscription, break outer loop
+					break subLoop
+				}
+
 				continue
 			}
 
@@ -185,7 +194,6 @@ func (c *OandaClient) subscribeTransactions(accountID string, handler Transactio
 
 			if err != nil {
 				logrus.Warn(err)
-				logrus.Debug(line)
 				continue
 			}
 
@@ -195,7 +203,26 @@ func (c *OandaClient) subscribeTransactions(accountID string, handler Transactio
 
 			handler(data)
 		}
-	}(reader)
+	}(reader, endpoint)
 
 	return nil
+}
+
+func (c *OandaClient) reconnect(endpoint string) (reader *bufio.Reader, err error) {
+
+	for i := 0; i < 3; i++ { // Try reconnection 3 times with exponential backoff
+
+		logrus.Info("Trying to recover subscription...")
+
+		time.Sleep(time.Duration(math.Pow(2, float64(i))) * 100 * time.Millisecond)
+
+		reader, err = c.dial(endpoint)
+
+		if err == nil {
+			logrus.Info("Subscription recovered")
+			return
+		}
+	}
+
+	return
 }
