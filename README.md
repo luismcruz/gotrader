@@ -57,4 +57,3 @@ if err := session.Start(); err != nil {
 - Write tests for gotrader
 - Include more broker clients
 - Refactor to add the possibility to use FIX protocol on the clients (control over position only)
-- Refactor to include pluggable metrics, such candlesticks, moving averages or user customized metrics. 

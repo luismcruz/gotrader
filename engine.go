@@ -247,6 +247,8 @@ func (e *liveEngine) startSwapChargesConsumer() {
 
 				trade := tr.(*Trade)
 				trade.chargedFees += charge.Ammount
+
+				e.account.balance.Add(charge.Ammount)
 			}
 		}
 	}()
