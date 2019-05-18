@@ -281,7 +281,6 @@ func (e *liveEngine) run() {
 				e.account.time = tick.Time
 
 				if e.ready {
-
 					e.account.calculateUnrealized()
 					e.account.calculateMarginUsed()
 					e.account.calculateFreeMargin()
@@ -322,7 +321,7 @@ func (e *liveEngine) calcMarginUsed(instrument string, units int32) float64 {
 
 	leverage := e.account.instruments[instrument].leverage
 	conversionRate := e.account.instruments[instrument].ccyConversion.BaseConversionRate.Load()
-	marginUsed := float64(units) / leverage.Load() / conversionRate
+	marginUsed := float64(units) / leverage.Load() * conversionRate
 
 	return marginUsed
 }

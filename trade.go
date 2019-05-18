@@ -63,7 +63,7 @@ func (t *Trade) calculateUnrealized() {
 }
 
 func (t *Trade) calculateMarginUsed() {
-	t.marginUsed = float64(t.units) / t.leverage.Load() / t.ccyConversion.BaseConversionRate.Load()
+	t.marginUsed = float64(t.units) / t.leverage.Load() * t.ccyConversion.BaseConversionRate.Load()
 }
 
 func (t *Trade) updateChargedFee(fee float64) {

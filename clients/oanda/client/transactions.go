@@ -212,14 +212,14 @@ func (c *OandaClient) reconnect(endpoint string) (reader *bufio.Reader, err erro
 
 	for i := 0; i < 3; i++ { // Try reconnection 3 times with exponential backoff
 
-		logrus.Info("Trying to recover subscription...")
+		logrus.Debug("Trying to recover subscription...")
 
 		time.Sleep(time.Duration(math.Pow(2, float64(i))) * 100 * time.Millisecond)
 
 		reader, err = c.dial(endpoint)
 
 		if err == nil {
-			logrus.Info("Subscription recovered")
+			logrus.Debug("Subscription recovered")
 			return
 		}
 	}
