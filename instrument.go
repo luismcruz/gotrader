@@ -245,3 +245,7 @@ func (i *Instrument) Bid() float64 {
 func (i *Instrument) Leverage() float64 {
 	return i.leverage.Load()
 }
+
+func (i *Instrument) Spread() float64 {
+	return i.Bid() - i.Ask()
+}
