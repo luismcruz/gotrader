@@ -2,6 +2,8 @@ package gotrader
 
 import (
 	"errors"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Option represents trading session functional option
@@ -75,6 +77,13 @@ func Leverage(leverage float64) Option {
 	}
 }
 
+// SetLogger is the functional option to define which logger will be used by the engine.
+func SetLogger(logger Logger) Option {
+	return func(p *sessionParameters) {
+		p.logger = logger
+	}
+}
+
 type testParameters struct {
 	initialBalance float64
 	homeCurrency   string
@@ -86,6 +95,7 @@ type sessionParameters struct {
 	instruments    []string
 	account        string
 	testParameters *testParameters
+	logger         Logger
 }
 
 // TradingSession represents the entrypoint struct of the gotrader package, representing a trading session.
@@ -127,14 +137,22 @@ func (s *TradingSession) SetClient(client BrokerClient) *TradingSession {
 
 // Live defines that this is a live session.
 func (s *TradingSession) Live() *TradingSession {
-	s.engine = newLiveEngine()
+
+	if s.parameters.logger == nil {
+		s.parameters.logger = logrus.New()
+	}
+	s.engine = newLiveEngine(s.parameters.logger)
 
 	return s
 }
 
 // Backtest defines that this is a backtesting session.
 func (s *TradingSession) Backtest() *TradingSession {
-	s.engine = newBtEngine()
+
+	if s.parameters.logger == nil {
+		s.parameters.logger = logrus.New()
+	}
+	s.engine = newBtEngine(s.parameters.logger)
 	s.engineType = 1
 
 	return s

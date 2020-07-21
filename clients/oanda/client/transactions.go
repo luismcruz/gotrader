@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/uber-go/atomic"
+	"go.uber.org/atomic"
 )
 
 type TradeFinancing struct {

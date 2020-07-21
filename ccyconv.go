@@ -1,8 +1,7 @@
 package gotrader
 
 import (
-	"github.com/sirupsen/logrus"
-	"github.com/uber-go/atomic"
+	"go.uber.org/atomic"
 )
 
 type instrumentConversion struct {
@@ -34,18 +33,19 @@ type currencyConversionEngine struct {
 	conversionInstruments        map[string]*instrumentConversion
 	conversionInstrumentsDetails []InstrumentDetails
 	availableInstruments         map[string]InstrumentDetails
-
-	conversionSet             map[string]bool            // set of instruments needed for conversion
-	dependentBaseInstruments  map[string]map[string]bool // map of a set
-	dependentQuoteInstruments map[string]map[string]bool // map of a set
-
-	homeCurrency string
+	conversionSet                map[string]bool            // set of instruments needed for conversion
+	dependentBaseInstruments     map[string]map[string]bool // map of a set
+	dependentQuoteInstruments    map[string]map[string]bool // map of a set
+	homeCurrency                 string
+	l                            Logger
 }
 
 func newCurrencyConversionEngine(
 	tradingInsts map[string]*instrumentConversion,
 	availableInsts map[string]InstrumentDetails,
-	homeCcy string) *currencyConversionEngine {
+	homeCcy string,
+	l Logger,
+) *currencyConversionEngine {
 
 	return &currencyConversionEngine{
 		conversionInstruments:        tradingInsts,
@@ -55,6 +55,7 @@ func newCurrencyConversionEngine(
 		dependentBaseInstruments:     make(map[string]map[string]bool),
 		dependentQuoteInstruments:    make(map[string]map[string]bool),
 		homeCurrency:                 homeCcy,
+		l:                            l,
 	}
 
 }
@@ -167,7 +168,7 @@ func (ce *currencyConversionEngine) findBaseConversionFunctions(instConv *instru
 
 		}
 
-		logrus.Warn("Base Conversion Function for instrument " + instConv.Name + " not found")
+		ce.l.Warn("base conversion function for instrument " + instConv.Name + " not found")
 
 	}
 
@@ -202,7 +203,7 @@ func (ce *currencyConversionEngine) findQuoteConversionFunctions(instConv *instr
 
 		}
 
-		logrus.Warn("Quote Conversion Function for instrument " + instConv.Name + " not found")
+		ce.l.Warn("quote conversion function for instrument " + instConv.Name + " not found")
 
 	}
 

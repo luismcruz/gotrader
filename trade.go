@@ -3,7 +3,7 @@ package gotrader
 import (
 	"time"
 
-	"github.com/uber-go/atomic"
+	"go.uber.org/atomic"
 )
 
 // Trade represents a transaction in a broker (execution of an order).
@@ -19,7 +19,7 @@ type Trade struct {
 	unrealizedEffectiveProfit float64
 	marginUsed                float64
 	leverage                  *atomic.Float64
-	chargedFees               float64
+	chargedFees               *atomic.Float64
 	openPrice                 float64
 	currentPrice              *atomic.Float64
 	sideSign                  float64
@@ -51,6 +51,7 @@ func newTrade(
 		sideSign:       sideSign(tradeSide),
 		ccyConversion:  inst.ccyConversion,
 		leverage:       inst.leverage,
+		chargedFees:    atomic.NewFloat64(0),
 	}
 
 	return tr
@@ -59,7 +60,7 @@ func newTrade(
 
 func (t *Trade) calculateUnrealized() {
 	t.unrealizedNetProfit = (t.currentPrice.Load() - t.openPrice) * t.sideSign * float64(t.units) * t.ccyConversion.QuoteConversionRate.Load()
-	t.unrealizedEffectiveProfit = t.unrealizedNetProfit + t.chargedFees
+	t.unrealizedEffectiveProfit = t.unrealizedNetProfit + t.chargedFees.Load()
 }
 
 func (t *Trade) calculateMarginUsed() {
@@ -67,7 +68,7 @@ func (t *Trade) calculateMarginUsed() {
 }
 
 func (t *Trade) updateChargedFee(fee float64) {
-	t.chargedFees += fee
+	t.chargedFees.Add(fee)
 	t.unrealizedEffectiveProfit += fee
 }
 
@@ -127,7 +128,7 @@ func (t *Trade) MarginUsed() float64 {
 
 // ChargedFees returns the total charged fees, like rollovers.
 func (t *Trade) ChargedFees() float64 {
-	return t.chargedFees
+	return t.chargedFees.Load()
 }
 
 // OpenPrice returns the openning price of the trade.

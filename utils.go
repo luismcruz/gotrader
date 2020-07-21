@@ -88,12 +88,12 @@ func (cs *sortedTrades) Get(index int) string {
 	cs.RLock()
 	defer cs.RUnlock()
 
-	if index < 0 || index > cs.count-1 {
+	if index < -1 || index > cs.count-1 {
 		return ""
 	}
 
 	if index == -1 {
-		index = cs.count
+		index = cs.count - 1
 	}
 
 	return cs.orderTrades[index]

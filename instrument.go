@@ -4,11 +4,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/uber-go/atomic"
-
-	"github.com/sirupsen/logrus"
-
 	"github.com/cornelk/hashmap"
+	"go.uber.org/atomic"
 )
 
 // Hedge represents the type of hedging defined by the broker.
@@ -26,6 +23,7 @@ type Instrument struct {
 	quoteCurrency             string
 	longPosition              *Position
 	shortPosition             *Position
+	tradesNumber              *atomic.Int32
 	trades                    *hashmap.HashMap
 	tradesTimeOrder           *sortedTrades
 	unrealizedNetProfit       float64
@@ -35,8 +33,10 @@ type Instrument struct {
 	chargedFees               float64
 	ask                       *atomic.Float64
 	bid                       *atomic.Float64
+	pipLocation               int
 	ccyConversion             *instrumentConversion
 	hedgeType                 Hedge
+	logger                    Logger
 }
 
 /**************************
@@ -45,16 +45,24 @@ type Instrument struct {
 *
 ***************************/
 
-func newInstrument(name, baseCurrency, quoteCurrency string,
-	leverage float64) *Instrument {
+func newInstrument(
+	name string,
+	baseCurrency string,
+	quoteCurrency string,
+	leverage float64,
+	pipLocation int,
+	logger Logger,
+) *Instrument {
 
 	return &Instrument{
 		name:            name,
 		baseCurrency:    baseCurrency,
 		quoteCurrency:   quoteCurrency,
 		leverage:        atomic.NewFloat64(leverage),
+		pipLocation:     pipLocation,
 		longPosition:    newPosition(Long),
 		shortPosition:   newPosition(Short),
+		tradesNumber:    atomic.NewInt32(0),
 		trades:          &hashmap.HashMap{},
 		tradesTimeOrder: newSortedTrades(),
 		ask:             atomic.NewFloat64(0.0),
@@ -62,7 +70,15 @@ func newInstrument(name, baseCurrency, quoteCurrency string,
 	}
 }
 
-func (i *Instrument) openTrade(id string, side Side, openTime time.Time, units int32, openPrice float64) {
+func (i *Instrument) openTrade(
+	id string,
+	side Side,
+	openTime time.Time,
+	units int32,
+	openPrice float64,
+) *Trade {
+
+	i.tradesNumber.Inc()
 
 	trade := newTrade(i, id, side, units, openTime, openPrice)
 	i.trades.Set(id, trade)
@@ -76,17 +92,20 @@ func (i *Instrument) openTrade(id string, side Side, openTime time.Time, units i
 		i.longPosition.openTrade(trade)
 	}
 
+	return trade
 }
 
 func (i *Instrument) closeTrade(id string) {
 
+	i.tradesNumber.Dec()
+
 	i.tradesTimeOrder.Delete(id)
 	tr, exist := i.trades.GetStringKey(id)
-
 	if !exist {
-		logrus.Warn(i.name + ": trying to close unexisting trade")
+		i.logger.Warn(i.name + ": trying to close unexisting trade")
 		return
 	}
+
 	i.trades.Del(id)
 
 	trade := tr.(*Trade)
@@ -160,8 +179,8 @@ func (i *Instrument) ShortPosition() *Position {
 	return i.shortPosition
 }
 
-func (i *Instrument) TradeByOrder(index int) string {
-	return i.tradesTimeOrder.Get(index)
+func (i *Instrument) TradeByOrder(index int) *Trade {
+	return i.Trade(i.tradesTimeOrder.Get(index))
 }
 
 func (i *Instrument) TradesByAscendingOrder(tradesNumber int) <-chan *Trade {
@@ -218,6 +237,10 @@ func (i *Instrument) Trades() <-chan *Trade {
 	return ch
 }
 
+func (i *Instrument) TradesNumber() int32 {
+	return i.tradesNumber.Load()
+}
+
 func (i *Instrument) UnrealizedNetProfit() float64 {
 	return i.unrealizedNetProfit
 }
@@ -242,10 +265,14 @@ func (i *Instrument) Bid() float64 {
 	return i.bid.Load()
 }
 
+func (i *Instrument) Spread() float64 {
+	return i.Bid() - i.Ask()
+}
+
 func (i *Instrument) Leverage() float64 {
 	return i.leverage.Load()
 }
 
-func (i *Instrument) Spread() float64 {
-	return i.Bid() - i.Ask()
+func (i *Instrument) PipLocation() int {
+	return i.pipLocation
 }

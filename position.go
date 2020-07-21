@@ -2,6 +2,7 @@ package gotrader
 
 import (
 	"github.com/cornelk/hashmap"
+	"go.uber.org/atomic"
 )
 
 // Side represents the type of position, which can be short or long
@@ -28,8 +29,8 @@ type Position struct {
 	side                      Side
 	trades                    *hashmap.HashMap
 	tradesTimeOrder           *sortedTrades
-	tradesNumber              int32
-	units                     int32
+	tradesNumber              *atomic.Int32
+	units                     *atomic.Int32
 	unrealizedNetProfit       float64
 	unrealizedEffectiveProfit float64
 	marginUsed                float64
@@ -48,6 +49,8 @@ func newPosition(side Side) *Position {
 		side:            side,
 		trades:          &hashmap.HashMap{},
 		tradesTimeOrder: newSortedTrades(),
+		tradesNumber:    atomic.NewInt32(0),
+		units:           atomic.NewInt32(0),
 	}
 }
 
@@ -55,9 +58,10 @@ func (p *Position) openTrade(trade *Trade) {
 
 	p.tradesTimeOrder.Append(trade.id)
 	p.trades.Set(trade.id, trade)
-	p.tradesNumber++
-	p.averagePrice = (p.averagePrice*float64(p.units) + trade.openPrice*float64(trade.units)) / float64(p.units+trade.units)
-	p.units += trade.units
+	p.tradesNumber.Inc()
+	p.averagePrice = (p.averagePrice*float64(p.units.Load()) + trade.openPrice*float64(trade.units)) /
+		float64(p.units.Load()+trade.units)
+	p.units.Add(trade.units)
 	trade.calculateMarginUsed()
 	p.marginUsed += trade.marginUsed
 
@@ -66,12 +70,12 @@ func (p *Position) openTrade(trade *Trade) {
 func (p *Position) closeTrade(trade *Trade) {
 	p.tradesTimeOrder.Delete(trade.id)
 	p.trades.Del(trade.id)
-	p.tradesNumber--
-	p.averagePrice = (p.averagePrice*float64(p.units) - trade.openPrice*float64(trade.units)) / float64(p.units-trade.units)
-	p.units -= trade.units
+	p.tradesNumber.Dec()
+	p.averagePrice = (p.averagePrice*float64(p.units.Load()) - trade.openPrice*float64(trade.units)) /
+		float64(p.units.Load()-trade.units)
+	p.units.Sub(trade.units)
 	trade.calculateMarginUsed()
 	p.marginUsed -= trade.marginUsed
-
 }
 
 func (p *Position) calculateUnrealized() {
@@ -90,7 +94,7 @@ func (p *Position) calculateUnrealized() {
 
 		unrealizedNet += trade.unrealizedNetProfit
 		unrealizedEffective += trade.unrealizedEffectiveProfit
-		chargedFees += trade.chargedFees
+		chargedFees += trade.chargedFees.Load()
 
 		averagePrice = (averagePrice*totalUnits + trade.openPrice*float64(trade.units)) / (totalUnits + float64(trade.units))
 		totalUnits += float64(trade.units)
@@ -189,11 +193,11 @@ func (p *Position) Trades() <-chan *Trade {
 }
 
 func (p *Position) TradesNumber() int32 {
-	return p.tradesNumber
+	return p.tradesNumber.Load()
 }
 
 func (p *Position) Units() int32 {
-	return p.units
+	return p.units.Load()
 }
 
 func (p *Position) UnrealizedNetProfit() float64 {

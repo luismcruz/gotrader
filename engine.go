@@ -1,6 +1,7 @@
 package gotrader
 
 import (
+	"errors"
 	"math"
 	"os"
 	"os/signal"
@@ -9,9 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/uber-go/atomic"
-
-	"github.com/sirupsen/logrus"
+	"go.uber.org/atomic"
 )
 
 // Engine is the interface used for interaction from strategy.
@@ -43,9 +42,10 @@ type liveEngine struct {
 	swapCharges              chan *SwapCharge
 	ready                    bool
 	endOfSession             chan bool
+	logger                   Logger
 }
 
-func newLiveEngine() *liveEngine {
+func newLiveEngine(logger Logger) *liveEngine {
 	return &liveEngine{
 		ticks:                   make(chan *Tick, 300),
 		orders:                  make(chan *OrderFill, 100),
@@ -53,6 +53,7 @@ func newLiveEngine() *liveEngine {
 		swapCharges:             make(chan *SwapCharge, 100),
 		availableInstrumentsMap: make(map[string]InstrumentDetails),
 		endOfSession:            make(chan bool, 1),
+		logger:                  logger,
 	}
 }
 
@@ -62,7 +63,6 @@ func (e *liveEngine) start() error {
 
 	// Account Status Retrieval
 	accountStatus, err := e.client.GetAccountStatus(e.parameters.account)
-
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,6 @@ func (e *liveEngine) start() error {
 
 	// Initialize Trading Instruments
 	availableInstruments, err := e.client.GetAvailableInstruments(e.account.id)
-
 	if err != nil {
 		return err
 	}
@@ -81,21 +80,22 @@ func (e *liveEngine) start() error {
 	conversionInstruments := make(map[string]*instrumentConversion)
 
 	for _, inst := range availableInstruments {
-
 		e.availableInstrumentsMap[inst.Name] = inst
-
 		for _, trdInst := range e.parameters.instruments {
 
 			if inst.Name == trdInst {
 
-				e.account.instruments[inst.Name] = newInstrument(inst.Name,
+				e.account.instruments[inst.Name] = newInstrument(
+					inst.Name,
 					inst.BaseCurrency,
 					inst.QuoteCurrency,
 					math.Min(inst.Leverage, e.account.leverage),
+					inst.PipLocation,
+					e.logger,
 				)
 				e.account.instruments[inst.Name].hedgeType = accountStatus.Hedge
-
-				conversionInstruments[inst.Name] = newInstrumentConversion(inst.Name,
+				conversionInstruments[inst.Name] = newInstrumentConversion(
+					inst.Name,
 					inst.BaseCurrency,
 					inst.QuoteCurrency,
 				)
@@ -106,52 +106,55 @@ func (e *liveEngine) start() error {
 	}
 
 	// Initialize Currency Conversion Engine
-	e.currencyConversionEngine = newCurrencyConversionEngine(conversionInstruments,
-		e.availableInstrumentsMap, e.account.homeCurrency)
+	e.currencyConversionEngine = newCurrencyConversionEngine(
+		conversionInstruments,
+		e.availableInstrumentsMap,
+		e.account.homeCurrency,
+		e.logger,
+	)
 	e.currencyConversionEngine.start()
 
 	e.currencyConversionEngine.setPricePointers(e.account.instruments)
 
 	// Hydrate current positions state from Broker sorted by open time
 	trades, err := e.client.GetOpenTrades(e.account.id)
-
 	if err != nil {
 		return err
 	}
 
-	sort.Slice(trades, func(i, j int) bool { return trades[i].OpenTime.Before(trades[j].OpenTime) })
+	// sort trade by open time, so they can be stored internally by time order
+	sort.Slice(trades,
+		func(i, j int) bool {
+			return trades[i].OpenTime.Before(trades[j].OpenTime)
+		},
+	)
 
 	for _, t := range trades {
-
 		inst, exist := e.account.instruments[t.Instrument.Name]
 		if exist {
-			inst.openTrade(t.ID, t.Side, t.OpenTime, t.Units, t.OpenPrice)
-			inst.Trade(t.ID).chargedFees = t.ChargedFees
+			trade := inst.openTrade(t.ID, t.Side, t.OpenTime, t.Units, t.OpenPrice)
+			trade.chargedFees.Add(t.ChargedFees)
 		}
 	}
 
 	// Subscribe prices
 	err = e.client.SubscribePrices(e.account.id, e.currencyConversionEngine.conversionInstrumentsDetails, e.onTick)
-
 	if err != nil {
 		return err
 	}
 
 	// Subscribe notifications
 	err = e.client.SubscribeOrderFillNotifications(e.account.id, e.onOrderFill)
-
 	if err != nil {
 		return err
 	}
 
 	err = e.client.SubscribeSwapChargeNotifications(e.account.id, e.onSwapCharge)
-
 	if err != nil {
 		return err
 	}
 
 	err = e.client.SubscribeFundsTransferNotifications(e.account.id, e.onFundsTransfer)
-
 	if err != nil {
 		return err
 	}
@@ -219,8 +222,13 @@ func (e *liveEngine) startOrderFillConsumer() {
 
 			if orderFill.Error == "" {
 				if !orderFill.TradeClose {
-					e.account.instruments[orderFill.Instrument.Name].openTrade(orderFill.TradeID,
-						orderFill.Side, orderFill.Time, orderFill.Units, orderFill.Price)
+					e.account.instruments[orderFill.Instrument.Name].openTrade(
+						orderFill.TradeID,
+						orderFill.Side,
+						orderFill.Time,
+						orderFill.Units,
+						orderFill.Price,
+					)
 				} else {
 					e.account.instruments[orderFill.Instrument.Name].closeTrade(orderFill.TradeID)
 					e.account.balance.Add(orderFill.Profit)
@@ -239,15 +247,13 @@ func (e *liveEngine) startSwapChargesConsumer() {
 			for _, charge := range swapCharge.Charges {
 
 				tr, exist := e.account.instruments[charge.Instrument.Name].trades.Get(charge.ID)
-
 				if !exist {
-					logrus.Warn(charge, "charging swap on unexisting trade")
+					e.logger.Warn(charge, "charging swap on unexisting trade")
 					continue
 				}
 
 				trade := tr.(*Trade)
-				trade.chargedFees += charge.Ammount
-
+				trade.chargedFees.Add(charge.Ammount)
 				e.account.balance.Add(charge.Ammount)
 			}
 		}
@@ -299,7 +305,7 @@ func (e *liveEngine) run() {
 					inst.Ask.Store(tick.Ask)
 					e.currencyConversionEngine.updateRate(tick.Instrument)
 				} else {
-					logrus.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
+					e.logger.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
 				}
 			}
 		}
@@ -352,7 +358,6 @@ func (e *liveEngine) Buy(instrument string, units int32) {
 		}
 
 		err := e.client.OpenMarketOrder(e.account.id, instrument, units, Long.String())
-
 		if err != nil {
 			e.orders <- &OrderFill{
 				Error:      err.Error(),
@@ -383,7 +388,6 @@ func (e *liveEngine) Sell(instrument string, units int32) {
 		}
 
 		err := e.client.OpenMarketOrder(e.account.id, instrument, units, Short.String())
-
 		if err != nil {
 			e.orders <- &OrderFill{
 				Error:      err.Error(),
@@ -403,7 +407,6 @@ func (e *liveEngine) CloseTrade(instrument, id string) {
 	go func() {
 
 		err := e.client.CloseTrade(e.account.id, id)
-
 		if err != nil {
 			e.orders <- &OrderFill{
 				Error:      err.Error(),
@@ -440,14 +443,16 @@ type btEngine struct {
 	instrumentsDetails       map[string]InstrumentDetails
 	ready                    bool
 	endOfSession             chan bool
+	logger                   Logger
 }
 
-func newBtEngine() *btEngine {
+func newBtEngine(logger Logger) *btEngine {
 	return &btEngine{
 		ticks:              make(chan *Tick, 300),
 		tradesCounter:      atomic.NewInt32(0),
 		instrumentsDetails: make(map[string]InstrumentDetails),
 		endOfSession:       make(chan bool, 1),
+		logger:             logger,
 	}
 }
 
@@ -455,14 +460,20 @@ func (e *btEngine) start() error {
 
 	e.account = newAccount(e.parameters.account)
 
+	if e.parameters == nil || e.parameters.testParameters == nil {
+		return errors.New("parameters are no defined")
+	}
+
 	// Account Status Retrieval
 	e.account.balance.Store(e.parameters.testParameters.initialBalance)
 	e.account.homeCurrency = e.parameters.testParameters.homeCurrency
 	e.account.leverage = e.parameters.testParameters.leverage
+	if e.account.leverage == 0 {
+		e.account.leverage = 1
+	}
 
 	// Initialize Trading Instruments
 	availableInstruments, err := e.client.GetAvailableInstruments(e.account.id)
-
 	if err != nil {
 		return err
 	}
@@ -480,15 +491,17 @@ func (e *btEngine) start() error {
 			if inst.Name == trdInst {
 
 				e.instrumentsDetails[inst.Name] = inst
-
-				e.account.instruments[inst.Name] = newInstrument(inst.Name,
+				e.account.instruments[inst.Name] = newInstrument(
+					inst.Name,
 					inst.BaseCurrency,
 					inst.QuoteCurrency,
 					math.Min(inst.Leverage, e.account.leverage),
+					inst.PipLocation,
+					e.logger,
 				)
 				e.account.instruments[inst.Name].hedgeType = e.parameters.testParameters.hedge
-
-				conversionInstruments[inst.Name] = newInstrumentConversion(inst.Name,
+				conversionInstruments[inst.Name] = newInstrumentConversion(
+					inst.Name,
 					inst.BaseCurrency,
 					inst.QuoteCurrency,
 				)
@@ -499,15 +512,18 @@ func (e *btEngine) start() error {
 	}
 
 	// Initialize Currency Conversion Engine
-	e.currencyConversionEngine = newCurrencyConversionEngine(conversionInstruments,
-		availableInstrumentsMap, e.account.homeCurrency)
+	e.currencyConversionEngine = newCurrencyConversionEngine(
+		conversionInstruments,
+		availableInstrumentsMap,
+		e.account.homeCurrency,
+		e.logger,
+	)
 	e.currencyConversionEngine.start()
 
 	e.currencyConversionEngine.setPricePointers(e.account.instruments)
 
 	// Subscribe prices
 	err = e.client.SubscribePrices(e.account.id, e.currencyConversionEngine.conversionInstrumentsDetails, e.onTick)
-
 	if err != nil {
 		return err
 	}
@@ -577,7 +593,10 @@ func (e *btEngine) onOrderOpen(instrument string, units int32, side Side) {
 
 	} else {
 		order = &OrderFill{
-			Error: "NOT_ENOUGH_MARGIN",
+			Error:      "NOT_ENOUGH_MARGIN",
+			Side:       side,
+			Instrument: e.instrumentsDetails[instrument],
+			Time:       time,
 		}
 	}
 
@@ -620,6 +639,7 @@ func (e *btEngine) onCloseTrade(tradeID, instrument string) {
 			Error:      "TRADE_DOES_NOT_EXIST",
 			TradeClose: true,
 			Time:       e.account.time,
+			Instrument: e.instrumentsDetails[instrument],
 		}
 	}
 
@@ -647,7 +667,6 @@ func (e *btEngine) run() {
 				e.account.time = tick.Time
 
 				if e.ready {
-
 					e.account.calculateUnrealized()
 					e.account.calculateMarginUsed()
 					e.account.calculateFreeMargin()
@@ -666,7 +685,7 @@ func (e *btEngine) run() {
 					inst.Ask.Store(tick.Ask)
 					e.currencyConversionEngine.updateRate(tick.Instrument)
 				} else {
-					logrus.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
+					e.logger.Warn("received a tick from an instrument that was not subscribed and it has been ignored")
 				}
 			}
 		}
